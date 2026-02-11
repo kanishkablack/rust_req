@@ -1,0 +1,163 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG
+
+variables:
+  CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
+  RUST_BACKTRACE: "1"
+
+stages:
+  - build
+  - release
+
+.build_nif:
+  stage: build
+  image: rust:latest
+  before_script:
+    - rustup target add ${RUST_TARGET}
+    - apt-get update && apt-get install -y ${EXTRA_PACKAGES:-}
+  script:
+    - cd native/rust_req_nif
+    - |
+      for nif_version in "2.15" "2.16"; do
+        echo "Building for NIF ${nif_version} target ${RUST_TARGET}"
+        feature_flag="nif_version_$(echo ${nif_version} | tr '.' '_')"
+        ${BUILD_TOOL:-cargo} build --release --target=${RUST_TARGET} --no-default-features --features="${feature_flag}"
+
+        # Package the .so/.dylib file
+        LIB_PREFIX="${LIB_PREFIX:-lib}"
+        LIB_SUFFIX="${LIB_SUFFIX:-.so}"
+        SRC="target/${RUST_TARGET}/release/${LIB_PREFIX}rust_req_nif${LIB_SUFFIX}"
+
+        ARCHIVE_NAME="rust_req_nif-nif-${nif_version}-${RUST_TARGET}-${CI_COMMIT_TAG:-v0.1.0}.tar.gz"
+        tar -czf "${CI_PROJECT_DIR}/${ARCHIVE_NAME}" -C "target/${RUST_TARGET}/release" "${LIB_PREFIX}rust_req_nif${LIB_SUFFIX}"
+        echo "Created ${ARCHIVE_NAME}"
+      done
+  artifacts:
+    paths:
+      - "*.tar.gz"
+    expire_in: 1 week
+
+build:x86_64-linux-gnu:
+  extends: .build_nif
+  image: ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-gnu
+  before_script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - . "${CARGO_HOME}/env"
+    - rustup target add ${RUST_TARGET}
+  tags:
+    - docker
+
+build:aarch64-linux-gnu:
+  extends: .build_nif
+  image: ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main
+  variables:
+    RUST_TARGET: aarch64-unknown-linux-gnu
+  before_script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - . "${CARGO_HOME}/env"
+    - rustup target add ${RUST_TARGET}
+  tags:
+    - docker
+
+build:x86_64-linux-musl:
+  extends: .build_nif
+  image: ghcr.io/cross-rs/x86_64-unknown-linux-musl:main
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-musl
+  before_script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - . "${CARGO_HOME}/env"
+    - rustup target add ${RUST_TARGET}
+  tags:
+    - docker
+
+build:arm-linux-gnueabihf:
+  extends: .build_nif
+  image: ghcr.io/cross-rs/arm-unknown-linux-gnueabihf:main
+  variables:
+    RUST_TARGET: arm-unknown-linux-gnueabihf
+  before_script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    - . "${CARGO_HOME}/env"
+    - rustup target add ${RUST_TARGET}
+  tags:
+    - docker
+
+build:x86_64-macos:
+  extends: .build_nif
+  image: rust:latest
+  variables:
+    RUST_TARGET: x86_64-apple-darwin
+    LIB_SUFFIX: ".dylib"
+    BUILD_TOOL: "cross"
+  before_script:
+    - cargo install cross --git https://github.com/cross-rs/cross
+    - rustup target add ${RUST_TARGET}
+  services:
+    - registry.hub.docker.com/library/docker:20.10.16-dind
+  tags:
+    - docker
+
+build:aarch64-macos:
+  extends: .build_nif
+  image: rust:latest
+  variables:
+    RUST_TARGET: aarch64-apple-darwin
+    LIB_SUFFIX: ".dylib"
+    BUILD_TOOL: "cross"
+  before_script:
+    - cargo install cross --git https://github.com/cross-rs/cross
+    - rustup target add ${RUST_TARGET}
+  services:
+    - registry.hub.docker.com/library/docker:20.10.16-dind
+  tags:
+    - docker
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - build:x86_64-linux-gnu
+    - build:aarch64-linux-gnu
+    - build:x86_64-linux-musl
+    - build:arm-linux-gnueabihf
+    - build:x86_64-macos
+    - build:aarch64-macos
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+  script:
+    - echo "Creating release for ${CI_COMMIT_TAG}"
+    - ls -la *.tar.gz
+  release:
+    tag_name: ${CI_COMMIT_TAG}
+    description: "Release ${CI_COMMIT_TAG}"
+    assets:
+      links:
+        - name: "rust_req_nif-nif-2.15-x86_64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.15-x86_64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz?job=build:x86_64-linux-gnu"
+        - name: "rust_req_nif-nif-2.16-x86_64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.16-x86_64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz?job=build:x86_64-linux-gnu"
+        - name: "rust_req_nif-nif-2.15-aarch64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.15-aarch64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz?job=build:aarch64-linux-gnu"
+        - name: "rust_req_nif-nif-2.16-aarch64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.16-aarch64-unknown-linux-gnu-${CI_COMMIT_TAG}.tar.gz?job=build:aarch64-linux-gnu"
+        - name: "rust_req_nif-nif-2.15-x86_64-unknown-linux-musl-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.15-x86_64-unknown-linux-musl-${CI_COMMIT_TAG}.tar.gz?job=build:x86_64-linux-musl"
+        - name: "rust_req_nif-nif-2.16-x86_64-unknown-linux-musl-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.16-x86_64-unknown-linux-musl-${CI_COMMIT_TAG}.tar.gz?job=build:x86_64-linux-musl"
+        - name: "rust_req_nif-nif-2.15-arm-unknown-linux-gnueabihf-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.15-arm-unknown-linux-gnueabihf-${CI_COMMIT_TAG}.tar.gz?job=build:arm-linux-gnueabihf"
+        - name: "rust_req_nif-nif-2.16-arm-unknown-linux-gnueabihf-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.16-arm-unknown-linux-gnueabihf-${CI_COMMIT_TAG}.tar.gz?job=build:arm-linux-gnueabihf"
+        - name: "rust_req_nif-nif-2.15-x86_64-apple-darwin-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.15-x86_64-apple-darwin-${CI_COMMIT_TAG}.tar.gz?job=build:x86_64-macos"
+        - name: "rust_req_nif-nif-2.16-x86_64-apple-darwin-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.16-x86_64-apple-darwin-${CI_COMMIT_TAG}.tar.gz?job=build:x86_64-macos"
+        - name: "rust_req_nif-nif-2.15-aarch64-apple-darwin-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.15-aarch64-apple-darwin-${CI_COMMIT_TAG}.tar.gz?job=build:aarch64-macos"
+        - name: "rust_req_nif-nif-2.16-aarch64-apple-darwin-${CI_COMMIT_TAG}.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/rust_req_nif-nif-2.16-aarch64-apple-darwin-${CI_COMMIT_TAG}.tar.gz?job=build:aarch64-macos"
