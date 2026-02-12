@@ -7,7 +7,7 @@ defmodule RustReq.Native do
     otp_app: :rust_req,
     crate: "rust_req_nif",
     base_url:
-      "https://git.grnconnect.com/grnc/api/rust_req/-/releases/v#{version}/downloads",
+      "https://github.com/kanishkablack/rust_req/releases/v#{version}/downloads",
     force_build: System.get_env("RUST_REQ_BUILD") in ["1", "true"],
     version: version,
     targets: ~w(
