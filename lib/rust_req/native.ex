@@ -8,7 +8,7 @@ defmodule RustReq.Native do
     crate: "rust_req_nif",
     base_url:
       "https://github.com/kanishkablack/rust_req/releases/download/v#{version}/",
-    force_build: System.get_env("RUST_REQ_BUILD") in ["1", "true"],
+    force_build: Application.compile_env(:rustler_precompiled, :force_build, [])[:rust_req] || false,
     version: version,
     targets: ~w(
       aarch64-apple-darwin

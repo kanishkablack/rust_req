@@ -1,7 +1,7 @@
 defmodule RustReq.MixProject do
   use Mix.Project
 
-  @version "0.2.4"
+  @version "0.2.5"
 
   def project do
     [
@@ -24,7 +24,7 @@ defmodule RustReq.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:rustler, ">= 0.0.0", optional: true},
+      {:rustler, ">= 0.0.0"},
       {:rustler_precompiled, "~> 0.8"}
     ]
   end
